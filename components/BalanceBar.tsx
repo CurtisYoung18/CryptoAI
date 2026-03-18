@@ -1,25 +1,30 @@
 'use client'
 
 import { useTradingStore } from '@/store/trading'
+import { useLang } from '@/lib/i18n'
 
 export default function BalanceBar() {
-  const balances = useTradingStore((s) => s.balances)
-
-  const significant = balances.filter(b => parseFloat(b.bal) > 0)
-
-  if (significant.length === 0) return null
+  const balances = useTradingStore(s => s.balances)
+  const { t } = useLang()
+  const sig = balances.filter(b => parseFloat(b.bal) > 0)
+  if (sig.length === 0) return null
 
   return (
-    <div className="flex items-center gap-4 px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs font-mono overflow-x-auto">
-      <span className="text-slate-500 flex-shrink-0">Balance</span>
-      {significant.map(b => (
-        <div key={b.ccy} className="flex items-center gap-1 flex-shrink-0">
-          <span className="text-slate-400">{b.ccy}</span>
-          <span className="text-white font-semibold">
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 20,
+      padding: '0 16px', height: 32, flexShrink: 0,
+      background: 'var(--c-surface)', borderBottom: '1px solid var(--c-border)',
+      overflowX: 'auto',
+    }}>
+      <span style={{ fontSize: 11, color: 'var(--c-t4)', flexShrink: 0 }}>{t.balance}</span>
+      {sig.map(b => (
+        <div key={b.ccy} style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+          <span style={{ fontSize: 11, color: 'var(--c-t3)', fontWeight: 500 }}>{b.ccy}</span>
+          <span className="mono" style={{ fontSize: 12, color: 'var(--c-t1)', fontWeight: 600 }}>
             {parseFloat(b.bal).toLocaleString(undefined, { maximumFractionDigits: 4 })}
           </span>
-          <span className="text-slate-500">
-            (avail: {parseFloat(b.availBal).toLocaleString(undefined, { maximumFractionDigits: 4 })})
+          <span style={{ fontSize: 11, color: 'var(--c-t4)' }}>
+            / {parseFloat(b.availBal).toLocaleString(undefined, { maximumFractionDigits: 4 })} {t.available}
           </span>
         </div>
       ))}

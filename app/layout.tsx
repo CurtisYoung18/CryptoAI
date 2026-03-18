@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { LangProvider } from '@/lib/i18n'
 
 export const metadata: Metadata = {
   title: 'OKX AI Trading Panel',
@@ -14,7 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="antialiased bg-slate-950 text-slate-100 min-h-screen">
-        {children}
+        <LangProvider>
+          {children}
+        </LangProvider>
       </body>
     </html>
   )

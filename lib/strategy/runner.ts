@@ -194,36 +194,58 @@ class StrategyRunner {
   private async runCycle() {
     if (!this.config.enabled) return
 
-    this.addLog('info', `Running AI cycle for ${this.config.instId}`)
+    this.addLog('info', `⏱ AI 分析周期开始 (${this.config.instId})`)
 
     try {
       const context = await this.gatherContext()
+
+      if (!context.ticker) {
+        this.addLog('error', '无法获取行情数据，跳过本轮')
+        return
+      }
+
+      this.addLog('info', `行情: ${this.config.instId} 价格=${context.ticker.last} 持仓=${context.positions?.length ?? 0}个 余额=${context.balance?.find(b => b.ccy === 'USDT')?.availBal ?? 'N/A'} USDT`)
+
       const decision = await getAIDecision(this.config.prompt, context)
 
-      this.addLog('decision', decision.reasoning || 'AI made a decision', {
-        toolCalls: decision.toolCalls,
-      })
+      // Log reasoning/thinking if present
+      if (decision.reasoning) {
+        this.addLog('decision', decision.reasoning)
+      }
+
+      // Log each tool call decision with full detail
+      if (!decision.toolCalls || decision.toolCalls.length === 0) {
+        // Fallback: dump raw response so we can debug
+        this.addLog('info', `AI 未返回操作指令 | raw: ${decision.rawContent.slice(0, 300)}`)
+        return
+      }
 
       for (const tool of decision.toolCalls) {
         if (tool.name === 'no_action') {
-          this.addLog('info', `No action: ${(tool.arguments as { reason?: string }).reason ?? 'unspecified'}`)
+          const reason = (tool.arguments as { reason?: string }).reason ?? '未说明'
+          this.addLog('info', `💤 不操作: ${reason}`)
           continue
         }
 
         try {
           const result = await this.executeToolCall(tool)
-          this.addLog('trade', `Executed ${tool.name}`, {
-            args: tool.arguments,
-            result,
-          })
+          // Format trade log: show key args inline
+          const args = tool.arguments as Record<string, string>
+          let summary = tool.name
+          if (tool.name === 'place_order') {
+            summary = `下单 ${args.side?.toUpperCase()} ${args.instId ?? this.config.instId} sz=${args.sz} ${args.ordType ?? ''} ${args.lever ? args.lever + 'x' : ''}`
+          } else if (tool.name === 'cancel_order') {
+            summary = `撤单 ${args.instId} ordId=${args.ordId}`
+          }
+          this.addLog('trade', `✅ ${summary} | ${result.slice(0, 120)}`)
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
-          this.addLog('error', `Tool ${tool.name} failed: ${msg}`)
+          this.addLog('error', `❌ ${tool.name} 失败: ${msg}`)
         }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      this.addLog('error', `Cycle error: ${msg}`)
+      this.addLog('error', `❌ 周期异常: ${msg}`)
     }
   }
 
@@ -238,7 +260,7 @@ class StrategyRunner {
   start() {
     if (this.running) return
     this.running = true
-    this.addLog('info', `Strategy runner started (interval: ${this.config.intervalMs / 1000}s)`)
+    this.addLog('info', `🚀 AI 策略引擎已启动 | 交易对: ${this.config.instId} | 间隔: ${this.config.intervalMs / 1000}s | 杠杆: ${this.config.lever}x`)
     this.runCycle().then(() => this.scheduleNext())
   }
 
@@ -248,17 +270,19 @@ class StrategyRunner {
       clearTimeout(this.timer)
       this.timer = null
     }
-    this.addLog('info', 'Strategy runner stopped')
+    this.addLog('info', '⏹ AI 策略引擎已停止')
   }
 }
 
 let _runner: StrategyRunner | null = null
 
 export function getStrategyRunner(): StrategyRunner {
-  if (!_runner) {
-    _runner = new StrategyRunner()
+  // Use globalThis to survive Next.js hot-reloads in dev
+  const g = globalThis as typeof globalThis & { __okxRunner?: StrategyRunner }
+  if (!g.__okxRunner) {
+    g.__okxRunner = new StrategyRunner()
   }
-  return _runner
+  return g.__okxRunner
 }
 
 export { StrategyRunner }

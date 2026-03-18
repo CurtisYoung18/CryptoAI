@@ -3,179 +3,259 @@
 import { useEffect, useCallback, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { useTradingStore } from '@/store/trading'
+import { useLang } from '@/lib/i18n'
 import ManualTradePanel from '@/components/ManualTradePanel'
 import PositionTable from '@/components/PositionTable'
 import AIControlPanel from '@/components/AIControlPanel'
+import AIChatPanel from '@/components/AIChatPanel'
 import BalanceBar from '@/components/BalanceBar'
 import type { TradingMode, SupportedPair, CandleInterval } from '@/lib/okx/types'
 
-// SSR must be disabled for the chart (uses browser APIs)
 const KLineChart = dynamic(() => import('@/components/KLineChart'), { ssr: false })
 
-const MODE_CONFIG: Record<TradingMode, { label: string; color: string; desc: string }> = {
-  manual: { label: 'Manual', color: 'bg-slate-600 text-white', desc: 'Full manual control' },
-  hybrid: { label: 'Hybrid', color: 'bg-yellow-600 text-white', desc: 'AI suggests, you confirm' },
-  ai:     { label: 'AI Auto', color: 'bg-blue-600 text-white', desc: 'AI trades autonomously' },
-}
+type LayoutMode = 'classic' | 'focus'
 
 export default function TradingPage() {
   const {
-    mode,
-    setMode,
-    selectedPair,
-    selectedBar,
-    setSelectedPair,
-    setSelectedBar,
-    setBalances,
-    setPositions,
+    mode, setMode, selectedPair, selectedBar,
+    setSelectedPair, setSelectedBar, setBalances, setPositions,
+    aiRunning, setAiRunning, strategyConfig, setStrategyConfig,
   } = useTradingStore()
+  const { lang, setLang, t } = useLang()
 
   const [configMissing, setConfigMissing] = useState(false)
   const [activePanel, setActivePanel] = useState<'trade' | 'ai'>('trade')
+  const [layout, setLayout] = useState<LayoutMode>('classic')
+
+  const MODE_CONFIG: Record<TradingMode, { label: string; desc: string }> = {
+    manual: { label: t.modeManual, desc: t.modeManualDesc },
+    hybrid: { label: t.modeHybrid, desc: t.modeHybridDesc },
+    ai:     { label: t.modeAI,     desc: t.modeAIDesc },
+  }
+
+  const handleModeChange = useCallback(async (m: TradingMode) => {
+    setMode(m)
+    if (m === 'ai') {
+      setActivePanel('ai')
+      if (!aiRunning) {
+        try {
+          const updatedConfig = { ...strategyConfig, enabled: true }
+          const res = await fetch('/api/ai/strategy', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedConfig),
+          })
+          const json = await res.json()
+          if (json.ok) { setStrategyConfig(json.data.config); setAiRunning(json.data.running) }
+        } catch {}
+      }
+    } else if (aiRunning) {
+      try {
+        const updatedConfig = { ...strategyConfig, enabled: false }
+        const res = await fetch('/api/ai/strategy', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedConfig),
+        })
+        const json = await res.json()
+        if (json.ok) { setStrategyConfig(json.data.config); setAiRunning(json.data.running) }
+      } catch {}
+    }
+  }, [aiRunning, setMode, setAiRunning, setStrategyConfig, strategyConfig])
 
   const refreshAccountData = useCallback(async () => {
     try {
       const [balRes, posRes] = await Promise.all([
-        fetch('/api/okx/balance'),
-        fetch('/api/okx/positions'),
+        fetch('/api/okx/balance'), fetch('/api/okx/positions'),
       ])
       const [balJson, posJson] = await Promise.all([balRes.json(), posRes.json()])
-
       if (balJson.ok) setBalances(balJson.data)
       else if (balJson.error?.includes('credentials not configured')) setConfigMissing(true)
-
       if (posJson.ok) setPositions(posJson.data)
     } catch {}
   }, [setBalances, setPositions])
 
   useEffect(() => {
     refreshAccountData()
-    const interval = setInterval(refreshAccountData, 15000)
-    return () => clearInterval(interval)
+    const iv = setInterval(refreshAccountData, 15000)
+    return () => clearInterval(iv)
   }, [refreshAccountData])
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-slate-950">
-      {/* Top Nav */}
-      <header className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800 flex-shrink-0 z-10">
-        <div className="flex items-center gap-3">
-          <span className="text-white font-bold tracking-tight text-sm">
-            OKX <span className="text-blue-400">AI</span> Trading
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', background: 'var(--c-bg)' }}>
+
+      {/* ── Header ── */}
+      <header style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 16px', height: '44px', flexShrink: 0,
+        background: 'var(--c-surface)',
+        borderBottom: '1px solid var(--c-border)',
+      }}>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{
+              width: 22, height: 22, borderRadius: 6,
+              background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, fontWeight: 700, color: '#fff',
+            }}>A</div>
+            <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--c-t1)', letterSpacing: '-0.3px' }}>
+              OKX Trading
+            </span>
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--c-t3)', paddingLeft: 4 }} className="hidden md:block">
+            {t.poweredBy}
           </span>
-          <span className="text-slate-600 text-xs">powered by MiniMax-M2.5</span>
         </div>
 
-        {/* Mode Toggle */}
-        <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
-          {(Object.entries(MODE_CONFIG) as [TradingMode, typeof MODE_CONFIG[TradingMode]][]).map(
-            ([m, cfg]) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                title={cfg.desc}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  mode === m ? cfg.color : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                {cfg.label}
-              </button>
-            )
+        {/* Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Mode - classic only */}
+          {layout === 'classic' && (
+            <div className="seg">
+              {(Object.entries(MODE_CONFIG) as [TradingMode, { label: string; desc: string }][]).map(([m, cfg]) => (
+                <button key={m} onClick={() => handleModeChange(m)} title={cfg.desc}
+                  className={mode === m ? (m === 'ai' ? 'on-blue' : 'on') : ''}>
+                  {m === 'ai' && aiRunning && (
+                    <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: 'var(--c-green)', marginRight: 4, verticalAlign: 'middle', animation: 'pulse 1.5s infinite' }} />
+                  )}
+                  {cfg.label}
+                </button>
+              ))}
+            </div>
           )}
-        </div>
 
-        <button
-          onClick={refreshAccountData}
-          className="text-xs text-slate-500 hover:text-white transition-colors px-2 py-1 rounded hover:bg-slate-800"
-        >
-          Refresh
-        </button>
+          {/* Layout */}
+          <div className="seg">
+            <button className={layout === 'classic' ? 'on' : ''} onClick={() => setLayout('classic')}>
+              {t.layoutClassic}
+            </button>
+            <button className={layout === 'focus' ? 'on-blue' : ''} onClick={() => setLayout('focus')}>
+              {t.layoutSimple}
+            </button>
+          </div>
+
+          {/* Language */}
+          <div className="seg">
+            <button className={lang === 'zh' ? 'on' : ''} onClick={() => setLang('zh')}>中</button>
+            <button className={lang === 'en' ? 'on' : ''} onClick={() => setLang('en')}>EN</button>
+          </div>
+
+          <button onClick={refreshAccountData} style={{
+            fontSize: 11, color: 'var(--c-t3)', padding: '4px 8px',
+            borderRadius: 6, background: 'transparent', transition: 'color 0.15s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'var(--c-t1)')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'var(--c-t3)')}>
+            ↻
+          </button>
+        </div>
       </header>
 
-      {/* Config warning banner */}
+      {/* Config missing warning */}
       {configMissing && (
-        <div className="bg-amber-900/40 border-b border-amber-600/40 text-amber-300 text-xs px-4 py-2 flex items-center gap-2 flex-shrink-0">
-          <span className="font-bold">⚠</span>
-          OKX credentials not configured. Copy <code className="bg-amber-900/60 px-1 rounded">.env.local.example</code> to <code className="bg-amber-900/60 px-1 rounded">.env.local</code> and add your API keys, then restart.
+        <div style={{
+          padding: '6px 16px', fontSize: 12, flexShrink: 0,
+          background: 'rgba(234,179,8,0.08)',
+          borderBottom: '1px solid rgba(234,179,8,0.15)',
+          color: 'var(--c-yellow)',
+        }}>
+          ⚠ {t.configMissing}
         </div>
       )}
 
-      {/* Balance bar */}
       <BalanceBar />
 
-      {/* Main layout */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left: Chart + Positions */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          {/* Chart */}
-          <div className="flex-1 min-h-0 p-2 pb-1">
-            <KLineChart
-              instId={selectedPair}
-              bar={selectedBar}
-              onPairChange={(pair: SupportedPair) => setSelectedPair(pair)}
-              onBarChange={(bar: CandleInterval) => setSelectedBar(bar)}
-            />
+      {/* ── CLASSIC ── */}
+      {layout === 'classic' && (
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {/* Chart area */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: '8px 8px 4px' }}>
+              <KLineChart
+                instId={selectedPair} bar={selectedBar}
+                onPairChange={(p: SupportedPair) => setSelectedPair(p)}
+                onBarChange={(b: CandleInterval) => setSelectedBar(b)}
+              />
+            </div>
+            <div style={{ flexShrink: 0, padding: '4px 8px 8px', maxHeight: 180, overflowY: 'auto' }}>
+              <PositionTable />
+            </div>
           </div>
 
-          {/* Positions */}
-          <div className="flex-shrink-0 p-2 pt-1 max-h-48 overflow-y-auto">
-            <PositionTable />
+          {/* Right panel */}
+          <div style={{
+            width: 308, flexShrink: 0, display: 'flex', flexDirection: 'column',
+            borderLeft: '1px solid var(--c-border)',
+            background: 'var(--c-surface)',
+            overflow: 'hidden',
+          }}>
+            {/* Tab bar */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--c-border)', flexShrink: 0 }}>
+              {(['trade', 'ai'] as const).map(p => (
+                <button key={p} onClick={() => setActivePanel(p)} style={{
+                  flex: 1, padding: '10px 0', fontSize: 12, fontWeight: 500,
+                  color: activePanel === p ? 'var(--c-t1)' : 'var(--c-t3)',
+                  borderBottom: activePanel === p ? '2px solid var(--c-blue)' : '2px solid transparent',
+                  background: 'transparent', transition: 'all 0.15s',
+                }}>
+                  {p === 'trade' ? t.tabTrade : t.tabAI}
+                </button>
+              ))}
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              {activePanel === 'trade'
+                ? <div style={{ height: '100%', overflowY: 'auto', padding: 8 }}><ManualTradePanel /></div>
+                : <AIControlPanel />}
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Right sidebar */}
-        <div className="w-80 flex-shrink-0 flex flex-col border-l border-slate-800 overflow-hidden">
-          {/* Panel tabs */}
-          <div className="flex border-b border-slate-800 flex-shrink-0">
-            <button
-              onClick={() => setActivePanel('trade')}
-              className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                activePanel === 'trade'
-                  ? 'text-white border-b-2 border-blue-500 bg-slate-900/50'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              Trade
-            </button>
-            <button
-              onClick={() => setActivePanel('ai')}
-              className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                activePanel === 'ai'
-                  ? 'text-white border-b-2 border-blue-500 bg-slate-900/50'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              AI Engine
-            </button>
+      {/* ── FOCUS ── */}
+      {layout === 'focus' && (
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {/* Chat */}
+          <div style={{ flex: 1, minWidth: 0, padding: 8, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <AIChatPanel />
           </div>
 
-          {/* Panel content */}
-          <div className="flex-1 overflow-hidden">
-            {activePanel === 'trade' ? (
-              <div className="h-full overflow-y-auto p-2">
-                <ManualTradePanel />
-              </div>
-            ) : (
+          {/* Right */}
+          <div style={{
+            width: 308, flexShrink: 0, display: 'flex', flexDirection: 'column',
+            borderLeft: '1px solid var(--c-border)',
+            background: 'var(--c-surface)',
+            overflow: 'hidden',
+          }}>
+            <div style={{ flexShrink: 0, padding: '8px 8px 6px', borderBottom: '1px solid var(--c-border)', maxHeight: 200, overflowY: 'auto' }}>
+              <PositionTable />
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden' }}>
               <AIControlPanel />
-            )}
+            </div>
           </div>
         </div>
+      )}
+
+      {/* ── Status bar ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 16,
+        padding: '0 16px', height: 26, flexShrink: 0,
+        borderTop: '1px solid var(--c-border)',
+        background: 'var(--c-surface)',
+        fontSize: 11, color: 'var(--c-t3)',
+      }}>
+        <span>{t.mode}: <span style={{ color: 'var(--c-t2)' }}>{MODE_CONFIG[mode].label}</span></span>
+        <span>{t.pair}: <span className="mono" style={{ color: 'var(--c-blue)' }}>{selectedPair}</span></span>
+        {layout === 'classic' && <span className="mono" style={{ color: 'var(--c-t4)' }}>{selectedBar}</span>}
+        <span style={{ marginLeft: 'auto' }}>OKX AI Trading</span>
       </div>
 
-      {/* Status bar */}
-      <div className="flex items-center gap-4 px-4 py-1 bg-slate-900 border-t border-slate-800 text-xs text-slate-500 flex-shrink-0">
-        <span>
-          Mode: <span className="text-white font-medium">{MODE_CONFIG[mode].label}</span>
-        </span>
-        <span>
-          Pair: <span className="text-blue-400 font-mono">{selectedPair}</span>
-        </span>
-        <span>
-          Interval: <span className="text-slate-400 font-mono">{selectedBar}</span>
-        </span>
-        <span className="ml-auto">
-          OKX AI Trading Panel
-        </span>
-      </div>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
     </div>
   )
 }

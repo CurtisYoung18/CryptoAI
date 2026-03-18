@@ -1,7 +1,6 @@
-import axios from 'axios'
 import type { OKXBalance, OKXPosition, OKXCandle } from '@/lib/okx/types'
 
-const MINIMAX_BASE = 'https://api.minimax.io'
+const MINIMAX_BASE = 'https://api.minimax.chat'
 const MODEL = 'MiniMax-M2.5'
 
 export interface TradeToolCall {
@@ -175,26 +174,42 @@ export async function getAIDecision(
     },
   ]
 
-  const res = await axios.post(
+  const res = await fetch(
     `${MINIMAX_BASE}/v1/text/chatcompletion_v2`,
     {
-      model: MODEL,
-      messages,
-      tools: TRADING_TOOLS,
-      tool_choice: 'required',
-      temperature: 0.2,
-      max_completion_tokens: 1024,
-    },
-    {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      timeout: 30000,
+      body: JSON.stringify({
+        model: MODEL,
+        messages,
+        tools: TRADING_TOOLS,
+        tool_choice: 'required',
+        temperature: 0.2,
+        max_completion_tokens: 1024,
+      }),
+      cache: 'no-store',
     }
   )
 
-  const choice = res.data.choices?.[0]
+  const data = await res.json() as {
+    choices?: {
+      message?: {
+        content?: string
+        reasoning_content?: string
+        tool_calls?: { id?: string; function: { name: string; arguments: string } }[]
+      }
+    }[]
+    base_resp?: { status_code: number; status_msg: string }
+  }
+
+  if (data.base_resp?.status_code && data.base_resp.status_code !== 0) {
+    throw new Error(`MiniMax error ${data.base_resp.status_code}: ${data.base_resp.status_msg}`)
+  }
+
+  const choice = data.choices?.[0]
   const message = choice?.message
 
   const toolCalls: TradeToolCall[] = []
@@ -203,15 +218,18 @@ export async function getAIDecision(
     for (const tc of message.tool_calls) {
       try {
         toolCalls.push({
-          name: tc.function.name,
+          name: tc.function.name as TradeToolCall['name'],
           arguments: JSON.parse(tc.function.arguments || '{}'),
         })
       } catch {}
     }
   }
 
+  // reasoning_content is the thinking/chain-of-thought; content is the text reply
+  const reasoning = message?.reasoning_content || message?.content || ''
+
   return {
-    reasoning: message?.content || '',
+    reasoning,
     toolCalls,
     rawContent: JSON.stringify(message),
   }
