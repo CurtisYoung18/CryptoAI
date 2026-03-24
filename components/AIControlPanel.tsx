@@ -65,7 +65,11 @@ export default function AIControlPanel() {
       try {
         const msg = JSON.parse(e.data)
         if (msg.type === 'init') {
-          for (const log of msg.logs) addLog(log)
+          // Deduplicate: only add logs not already in store
+          const existingIds = new Set(useTradingStore.getState().logs.map((l: RunnerLog) => l.id))
+          for (const log of msg.logs) {
+            if (!existingIds.has(log.id)) addLog(log)
+          }
           setAiRunning(msg.running)
           if (msg.running) setTab('logs')
         } else if (msg.type === 'log') {
@@ -247,8 +251,8 @@ export default function AIControlPanel() {
             {logs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 0', fontSize: 12, color: 'var(--c-t4)' }}>{t.noLogs}</div>
             ) : (
-              [...logs].reverse().map(log => (
-                <div key={log.id} style={{
+              [...logs].reverse().map((log, i) => (
+                <div key={`${log.id}-${i}`} style={{
                   display: 'flex', gap: 8, padding: '6px 8px', borderRadius: 6,
                   background: LOG_BG[log.type],
                   transition: 'background 0.15s',

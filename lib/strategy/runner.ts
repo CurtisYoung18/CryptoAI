@@ -88,9 +88,11 @@ class StrategyRunner {
     return this.running
   }
 
+  private logCounter = 0
+
   private addLog(type: RunnerLog['type'], message: string, details?: unknown) {
     const log: RunnerLog = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: `${Date.now()}-${++this.logCounter}-${Math.random().toString(36).slice(2, 7)}`,
       ts: new Date().toISOString(),
       type,
       message,
